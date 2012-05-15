@@ -264,7 +264,11 @@ class FqlHandler(webapp2.RequestHandler):
 
     try:
       query_arg = 'q' if graph_endpoint else 'query'
+
+      # Multiline, multispace support
       query = self.request.get(query_arg)
+      query = re.sub(' +', ' ', query).replace('\n', '').strip()
+
       if not query:
         raise MissingParamError(query_arg)
 
@@ -300,6 +304,10 @@ class FqlHandler(webapp2.RequestHandler):
 
     except FqlError, e:
       results = self.error(self.request.GET, e.code, e.msg)
+
+    # Encapsulate results in a data keyword
+    if graph_endpoint:
+        results = {'data': results}
 
     if self.request.get('format') == 'json' or graph_endpoint:
       json.dump(results, self.response.out, indent=2)
