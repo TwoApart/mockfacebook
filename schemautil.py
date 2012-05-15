@@ -339,7 +339,10 @@ class FqlDataset(Dataset):
                               for col in self.schema.tables[table])
       for object in data.data:
         # order columns to match schema (which is the order in FQL docs)
-        values_str = self.schema.json_to_sqlite(object, table)
+        try:
+            values_str = self.schema.json_to_sqlite(object, table)
+        except:
+            continue
         output.append("""\
 INSERT OR IGNORE INTO `%s` (
   %s
