@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS oauth_codes (
 );
 
 CREATE TABLE IF NOT EXISTS oauth_access_tokens (
+  user_id TEXT NOT NULL,
   token TEXT NOT NULL,
   code TEXT NOT NULL,
   FOREIGN KEY(code) REFERENCES auth_codes(code)

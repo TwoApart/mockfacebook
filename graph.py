@@ -336,9 +336,20 @@ class GraphHandler(webapp2.RequestHandler):
       id = None
 
     try:
-      token =  self.request.get('access_token')
+      token = self.request.get('access_token')
+
       if token and not oauth.AccessTokenHandler.is_valid_token(self.conn, token):
         raise ValidationError()
+
+      # Find current me if not provided
+      if not self.me and token:
+          try:
+              sql = 'SELECT user_id FROM oauth_access_tokens WHERE token="%s";' % token
+
+              cursor = self.conn.execute(sql)
+              self.me = cursor.fetchone()[0]
+          except:
+              pass
 
       namedict = self.prepare_ids(id)
 

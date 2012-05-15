@@ -42,21 +42,16 @@ end
 
 __author__ = ['Ryan Barrett <mockfacebook@ryanb.org>']
 
+import requests
 import collections
-import httplib
-import itertools
 import json
 import logging
-import operator
 import optparse
 import re
 import sys
-import traceback
 import urllib
-import urllib2
 import urlparse
 
-import graph
 import schemautil
 
 
@@ -681,7 +676,9 @@ def main():
   options = parse_args()
 
   if options.db_file:  # FIXME - should do dupe checking
-    sql = 'INSERT INTO oauth_access_tokens(code, token) VALUES("asdf", "%s");' % options.access_token
+    response = requests.get('me', params={'access_token': options.access_token})
+    user_id = response['id']
+    sql = 'INSERT INTO oauth_access_tokens(user_id, code, token) VALUES("%s", "asdf", "%s");' % (user_id, options.access_token)
     schemautil.get_db(options.db_file).executescript(sql)
 
   if options.fql_schema:

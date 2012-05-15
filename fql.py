@@ -268,9 +268,19 @@ class FqlHandler(webapp2.RequestHandler):
       if not query:
         raise MissingParamError(query_arg)
 
-      token =  self.request.get('access_token')
+      token = self.request.get('access_token')
       if token and not oauth.AccessTokenHandler.is_valid_token(self.conn, token):
         raise InvalidAccessTokenError()
+
+      # Find current me if not provided
+      if not self.me and token:
+          try:
+              sql = 'SELECT user_id FROM oauth_access_tokens WHERE token="%s";' % token
+
+              cursor = self.conn.execute(sql)
+              self.me = cursor.fetchone()[0]
+          except:
+              pass
 
       logging.debug('Received FQL query: %s' % query)
 
