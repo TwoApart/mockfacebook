@@ -102,6 +102,7 @@ COLUMN_TYPES = {
   'number':     ('int', 'INTEGER'),
   'object':     ('object', ''),
   'string':     ('string', 'TEXT'),
+  'photo':     ('string', 'TEXT'),
   'structure':  ('object', ''),
   'time':       ('int', 'INTEGER'),
   'uid':        ('int', 'INTEGER'),
@@ -288,35 +289,7 @@ def print_and_flush(str):
   sys.stdout.flush()
 
 
-def urlopen_with_retries(url, data=None):
-  """Wrapper for urlopen that automatically retries on HTTP errors.
-
-  If redirect is False and the url is 302 redirected, raises Redirected
-  with the destination URL in the exception value.
-  """
-  for i in range(HTTP_RETRIES + 1):
-    try:
-      opened = urllib2.urlopen(url, data=data, timeout=HTTP_TIMEOUT_S)
-      # if we ever need to determine whether we're redirected here, do something
-      # like this:
-      #
-      # if opened.geturl() != url:
-      #   ...
-      #
-      # it's not great - you can easily imagine failure cases - but it's by far
-      # the simplest way. discussion: http://stackoverflow.com/questions/110498
-      return opened
-
-    except (IOError, urllib2.HTTPError), e:
-      logging.debug('retrying due to %s' % e)
-
-  print >> sys.stderr, 'Gave up on %s after %d tries. Last error:' % (
-    url, HTTP_RETRIES)
-  traceback.print_exc(file=sys.stderr)
-  raise e
-
-
-def make_column(table, column, fb_type, indexable=None):
+def make_column(table, column, raw_fb_type, indexable=None):
   """Populates and returns a Column for a schema.
 
   Args:
@@ -327,10 +300,10 @@ def make_column(table, column, fb_type, indexable=None):
 
   Returns: Column
   """
-  fb_type, sqlite_type = COLUMN_TYPES.get(fb_type.lower(), (None, None))
-  if fb_type is None:
-    print >> sys.stderr, 'TODO: %s.%s has unknown type %s' % (
-      table, column, raw_fb_type)
+  fb_type, sqlite_type = COLUMN_TYPES.get(raw_fb_type.lower(), (None, None))
+
+  if raw_fb_type is None:
+    print >> sys.stderr, 'TODO: %s.%s has unknown type %s' % (table, column, raw_fb_type)
 
   return schemautil.Column(name=column,
                            fb_type=fb_type,
@@ -349,6 +322,7 @@ def column_from_metadata_field(table, field):
   """
   name = field['name']
   match = GRAPH_DESCRIPTION_TYPE_RE.search(field['description'])
+
   if match:
     fb_type = match.group(1)
   else:
@@ -370,12 +344,12 @@ def scrape_schema(schema, url, column_re):
   """
   print_and_flush('Generating %s' % schema.__class__.__name__)
 
-  index_html = urlopen_with_retries(url).read()
+  index_html = requests.get(url).content
   print_and_flush('.')
 
   links_html = TABLE_LINKS_RE.search(index_html).group()
   for link in TABLE_LINK_RE.findall(links_html):
-    table_html = urlopen_with_retries(link).read()
+    table_html = requests.get(link).content
     tables = TABLE_RE.findall(table_html)
     assert len(tables) == 1
     table = tables[0].strip()
@@ -386,7 +360,7 @@ def scrape_schema(schema, url, column_re):
     # column_re has three groups: indexable, name, type
     column_data = column_re.findall(table_html)
     column_names = [c[1] for c in column_data]
-    override_types = OVERRIDE_COLUMN_TYPES[table]
+
     override_indexable = OVERRIDE_COLUMN_INDEXABLE[table]
     for name in set(override_types.keys()) | set(override_indexable.keys()):
       if name not in column_names:
@@ -489,13 +463,17 @@ def fetch_graph_schema_and_data(ids):
   print_and_flush('Generating Graph API schema and example data')
 
   # fetch the objects
-  objects = batch_request(ids, args={'metadata': 'true',
-                                     'limit': options.num_per_type})
+  objects = batch_request(ids, args={'metadata': 'true', 'limit': options.num_per_type})
 
   # strip the metadata and generate and store the schema
   connections = []  # list of (name, url) tuples
   for id, object in objects.items():
-    metadata = object.pop('metadata')
+    try:
+       metadata = object.pop('metadata')
+    except AttributeError:
+        if isinstance(object, bool):
+            continue
+        raise
     table = object['type']
 
     # columns
@@ -512,7 +490,7 @@ def fetch_graph_schema_and_data(ids):
   # store the objects in the dataset
   dataset.data = dict(
     (id, schemautil.Data(table=object['type'], query=id, data=object))
-    for id, object in objects.items())
+    for id, object in objects.items() if not isinstance(object, bool))
 
   conn_paths = [urlparse.urlparse(url).path
                 for name, url in connections if name not in UNSUPPORTED_CONNECTIONS]
@@ -536,34 +514,6 @@ def fetch_graph_schema_and_data(ids):
   return schema, dataset
 
 
-# this code works fine, but it's been replaced with batch_request().
-# it's still good though. keep it or dump it?
-#
-# def facebook_query(url=None, args=None, query=None, table=None):
-#   """Makes an FQL or Graph API request.
-
-#   Args:
-#     url: string
-#     args: dict of query parameters
-#     query: value for the query field in the returned Data object
-#     table: string
-
-#   Returns:
-#     schemautil.Data
-#   """
-#   parts = list(urlparse.urlparse(url))
-#   args['access_token'] = options.access_token
-#   for arg, vals in urlparse.parse_qs(parts[4]).items():
-#     args[arg] = vals[0]
-#   parts[4] = urllib.urlencode(args)
-
-#   url = urlparse.urlunparse(parts)
-#   result = json.loads(urlopen_with_retries(url).read())
-#   assert 'error_code' not in result, 'FQL error:\n%s' % result
-#   url = re.sub('access_token=[^&]+', 'access_token=XXX', url)
-
-#   return schemautil.Data(table=table, query=query, url=url, data=result)
-
 
 def batch_request(urls, args=None):
   """Makes a Graph API batch request.
@@ -581,17 +531,20 @@ def batch_request(urls, args=None):
 
   urls = list(urls)
   params = '?%s' % urllib.urlencode(args) if args else ''
-  requests = [{'method': 'GET', 'relative_url': url + params} for url in urls]
-
+  requests_to_do = [{'method': 'GET', 'relative_url': url + params} for url in urls]
   responses = []
-  for i in range(0, len(requests), MAX_REQUESTS_PER_BATCH):
-    data = urllib.urlencode({'access_token': options.access_token,
-                             'batch': json.dumps(requests[i:i + 50])})
-    response = urlopen_with_retries(options.graph_api_url, data=data)
-    responses.extend(json.loads(response.read()))
+
+  for i in range(0, len(requests_to_do), MAX_REQUESTS_PER_BATCH):
+    data = {
+        'access_token': options.access_token,
+        'batch': json.dumps(requests_to_do[i:i + 50])
+    }
+
+    response = requests.post(options.graph_api_url, data=data)
+    responses.extend(json.loads(response.content))
     print_and_flush('.')
 
-  assert len(responses) == len(requests)
+  assert len(responses) == len(requests_to_do)
 
   results = {}
   for url, resp in zip(urls, responses):
