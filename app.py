@@ -12,7 +12,6 @@ class TestUsersHandler(webapp2.RequestHandler):
         """
           conn: sqlite3.Connection
         """
-        print "INIT"
         cls.conn = conn
 
     def get(self, app_id):
