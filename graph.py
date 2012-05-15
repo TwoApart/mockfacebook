@@ -15,13 +15,12 @@ import traceback
 import types
 import urllib
 import re
-
+from urllib import unquote
 import datetime
 import random
 import sys
 
 import webapp2
-
 import oauth
 import schemautil
 
@@ -471,16 +470,22 @@ class GraphHandler(webapp2.RequestHandler):
 
 
     cursor = self.conn.execute(
-      'SELECT id, data FROM graph_objects WHERE id IN (%s)' % self.qmarks(ids),
+      'SELECT DISTINCT id, data FROM graph_objects WHERE id IN (%s)' % self.qmarks(ids),
       ids)
-    ret_dict = dict((namedict[obj_id], json.loads(data)) for obj_id, data in cursor.fetchall())
+
+    # List of fields to filter
+    fields = unquote(self.request.get('fields'))
+    fields = fields.split(',') if fields else []
+    filtered_data = {}
+    for user_id, data in cursor.fetchall():
+        filtered_data[user_id] = dict([[key, value] for key, value in json.loads(data).items() if key in fields or not fields])
 
     # Anything in the published graph objects overwrite the normal results
     for obj_id in ids:
       if obj_id in GraphHandler.posted_graph_objects:
-        ret_dict[obj_id] = GraphHandler.posted_graph_objects[obj_id]
+        filtered_data[obj_id] = GraphHandler.posted_graph_objects[obj_id]
 
-    return ret_dict
+    return filtered_data
 
   def get_connections(self, namedict, connection):
     if not namedict:
@@ -489,7 +494,7 @@ class GraphHandler(webapp2.RequestHandler):
       raise UnknownPathError(connection)
 
     ids = namedict.keys()
-    query = ('SELECT id, data FROM graph_connections '
+    query = ('SELECT DISTINCT id, data FROM graph_connections '
                'WHERE id IN (%s) AND connection = ?' % self.qmarks(ids))
     cursor = self.conn.execute(query, ids + [connection])
     rows = cursor.fetchall()
@@ -503,9 +508,18 @@ class GraphHandler(webapp2.RequestHandler):
       posted_data = GraphHandler.posted_connections.get(name, {}).get(connection, [])
       resp[name] = {"data": posted_data}
 
-    for id, data in rows:
-      resp[namedict[id]]['data'].extend(posted_data)
-      resp[namedict[id]]['data'].append(json.loads(data))
+    # Anything in the published graph objects overwrite the normal results
+    for obj_id in ids:
+      if obj_id in GraphHandler.posted_graph_objects:
+        filtered_data[obj_id] = GraphHandler.posted_graph_objects[obj_id]
+
+
+    # List of fields to filter
+    fields = unquote(self.request.get('fields'))
+    fields = fields.split(',') if fields else []
+    for user_id, data in rows:
+        filtered_data = dict([[key, value] for key, value in json.loads(data).items() if key in fields or not fields])
+        resp[namedict[user_id]]['data'].append(filtered_data)
 
     return resp
 
@@ -542,7 +556,7 @@ class GraphHandler(webapp2.RequestHandler):
 
     qmarks = self.qmarks(names)
     cursor = self.conn.execute(
-      'SELECT id, alias FROM graph_objects WHERE id IN (%s) OR alias IN (%s)' %
+      'SELECT DISTINCT id, alias FROM graph_objects WHERE id IN (%s) OR alias IN (%s)' %
         (qmarks, qmarks),
       tuple(names) * 2)
 
