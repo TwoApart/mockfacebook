@@ -19,6 +19,7 @@ import wsgiref.simple_server
 import webapp2
 
 import fql
+import app
 import graph
 import oauth
 import schemautil
@@ -35,6 +36,7 @@ ROW_COUNT_WARNING_THRESHOLD = 10
 
 # order matters here! the first handler with a matching route is used.
 HANDLER_CLASSES = (
+  app.TestUsersHandler,
   oauth.AuthCodeHandler,
   oauth.AccessTokenHandler,
   fql.FqlHandler,
