@@ -629,10 +629,13 @@ def main():
   options = parse_args()
 
   if options.db_file:  # FIXME - should do dupe checking
-    response = requests.get('me', params={'access_token': options.access_token})
-    user_id = response['id']
-    sql = 'INSERT INTO oauth_access_tokens(user_id, code, token) VALUES("%s", "asdf", "%s");' % (user_id, options.access_token)
-    schemautil.get_db(options.db_file).executescript(sql)
+    response = requests.get('https://graph.facebook.com/me', params={'access_token': options.access_token})
+    if response.ok:
+        user_id = response.json['id']
+        sql = 'INSERT INTO oauth_access_tokens(user_id, code, token) VALUES("%s", "asdf", "%s");' % (user_id, options.access_token)
+        schemautil.get_db(options.db_file).executescript(sql)
+    else:
+        print >> sys.stderr, "There was a problem downloading the user info [%s]" % options.access_token
 
   if options.fql_schema:
     fql_schema = schemautil.FqlSchema()
